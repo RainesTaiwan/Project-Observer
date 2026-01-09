@@ -1,0 +1,46 @@
+# 環境變量
+.env
+
+# Docker 數據
+mc-data/
+chroma-data/
+agent_skills/
+agent_logs/
+agent_memory/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 日誌
+*.log
+logs/
+
+# 測試
+.pytest_cache/
+.coverage
+htmlcov/

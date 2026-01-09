@@ -1,0 +1,16 @@
+{
+  "name": "minecraft-ai-agent",
+  "version": "1.0.0",
+  "description": "AI Agent for Minecraft using Mineflayer",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "canvas": "^2.11.2",
+    "mineflayer": "^4.17.0",
+    "mineflayer-pathfinder": "^2.4.4",
+    "prismarine-viewer": "^1.33.0",
+    "vec3": "^0.1.8"
+  }
+}

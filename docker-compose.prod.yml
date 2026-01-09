@@ -1,0 +1,100 @@
+# Production Docker Compose Configuration
+# 生產環境專用配置，覆蓋開發環境設置
+
+version: '3.8'
+
+services:
+  mc-server:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "mc-monitor", "status", "--host", "localhost", "--port", "25565"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+
+  chromadb:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  ai-bot:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    environment:
+      - LOG_LEVEL=INFO  # 生產環境降低日誌等級
+      - PYTHON_ENV=production
+    security_opt:
+      - no-new-privileges:true
+
+  dashboard:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+# 網路隔離（可選）
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

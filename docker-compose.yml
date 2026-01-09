@@ -1,0 +1,105 @@
+version: "3.8"
+
+services:
+  # 1. Minecraft 伺服器 - AI 和玩家的遊戲世界
+  mc-server:
+    image: itzg/minecraft-server:latest
+    container_name: mc-world
+    ports:
+      - "25565:25565"
+    environment:
+      EULA: "TRUE"
+      VERSION: "1.20.1"
+      TYPE: "FABRIC"
+      ONLINE_MODE: "FALSE"  # 關鍵：允許 Bot 登入
+      MOTD: "AI Training Grounds - Project Observer"
+      MAX_MEMORY: "2G"
+      DIFFICULTY: "normal"
+      SPAWN_PROTECTION: "0"
+      VIEW_DISTANCE: "10"
+    volumes:
+      - ./mc-data:/data
+    networks:
+      - ai-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc-monitor", "status", "--host", "localhost", "--port", "25565"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 2. 向量資料庫 (AI 長期記憶)
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: ai-memory
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./chroma-data:/chroma/chroma
+    networks:
+      - ai-net
+    restart: unless-stopped
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+
+  # 3. AI 代理人 - 智能核心
+  ai-bot:
+    ports:
+      - "3000:3000"  # Prismarine Viewer
+    build: 
+      context: ./agent_code
+      dockerfile: Dockerfile
+    container_name: steve-gpt
+    depends_on:
+      mc-server:
+        condition: service_healthy
+      chromadb:
+        condition: service_started
+    environment:
+      MC_HOST: "mc-server"
+      MC_PORT: "25565"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      OPENAI_API_BASE: "${OPENAI_API_BASE:-https://api.openai.com/v1}"
+      LLM_MODEL: "${LLM_MODEL:-gpt-4}"
+      BOT_USERNAME: "Agent_001"
+      CHROMA_HOST: "chromadb"
+      CHROMA_PORT: "8000"
+      LOG_LEVEL: "INFO"
+    volumes:
+      - ./agent_skills:/app/skills        # 技能持久化
+      - ./agent_logs:/app/logs            # 日誌持久化
+      - ./agent_memory:/app/memory        # 記憶持久化
+    networks:
+      - ai-net
+    restart: unless-stopped
+
+  # 4. 觀測面板 - Web 界面
+  dashboard:
+    build: 
+      context: ./dashboard_code
+      dockerfile: Dockerfile
+    container_name: observer-dashboard
+    ports:
+      - "8501:8501"
+    depends_on:
+      - ai-bot
+    environment:
+      LOG_SOURCE: "/app/logs"
+      AGENT_CONTAINER: "steve-gpt"
+    volumes:
+      - ./agent_logs:/app/logs:ro         # 只讀訪問日誌
+      - ./agent_skills:/app/skills:ro     # 只讀訪問技能
+      - ./agent_memory:/app/memory:ro     # 只讀訪問記憶
+    networks:
+      - ai-net
+    restart: unless-stopped
+
+networks:
+  ai-net:
+    driver: bridge
+    name: project-observer-network
+
+volumes:
+  mc-data:
+  chroma-data:

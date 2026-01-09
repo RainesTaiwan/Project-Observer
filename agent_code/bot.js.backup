@@ -1,0 +1,224 @@
+/**
+ * Minecraft Bot - Node.js Mineflayer Controller
+ * 這是與 Minecraft 遊戲直接交互的 Node.js 層
+ */
+
+const mineflayer = require('mineflayer');
+const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
+const { Vec3 } = require('vec3');
+
+// 從環境變量讀取配置
+const MC_HOST = process.env.MC_HOST || 'mc-server';
+const MC_PORT = parseInt(process.env.MC_PORT || '25565');
+const BOT_USERNAME = process.env.BOT_USERNAME || 'Agent_001';
+
+// 創建 Bot
+const bot = mineflayer.createBot({
+  host: MC_HOST,
+  port: MC_PORT,
+  username: BOT_USERNAME,
+  version: '1.20.1'
+});
+
+// 加載插件
+bot.loadPlugin(pathfinder);
+
+// Bot 準備就緒
+bot.once('spawn', () => {
+  console.log(`✅ Bot ${BOT_USERNAME} spawned in the world`);
+  
+  // 設置默認移動行為
+  const mcData = require('minecraft-data')(bot.version);
+  const defaultMove = new Movements(bot, mcData);
+  bot.pathfinder.setMovements(defaultMove);
+});
+
+// 錯誤處理
+bot.on('error', (err) => {
+  console.error('❌ Bot error:', err);
+});
+
+bot.on('kicked', (reason) => {
+  console.error('❌ Bot was kicked:', reason);
+});
+
+bot.on('end', () => {
+  console.log('👋 Bot disconnected');
+});
+
+// 監聽聊天訊息
+bot.on('chat', (username, message) => {
+  if (username === bot.username) return;
+  console.log(`💬 ${username}: ${message}`);
+});
+
+// 處理來自 Python 的命令
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', async (data) => {
+  try {
+    const command = JSON.parse(data.trim());
+    
+    if (command.action === 'get_state') {
+      // 獲取當前狀態
+      const state = getCurrentState();
+      process.stdout.write(JSON.stringify(state) + '\n');
+      
+    } else if (command.action === 'execute_code') {
+      // 執行動態代碼
+      const result = await executeCode(command.code);
+      process.stdout.write(JSON.stringify(result) + '\n');
+    }
+    
+  } catch (err) {
+    console.error('❌ Error processing command:', err);
+    process.stdout.write(JSON.stringify({
+      success: false,
+      error: err.message
+    }) + '\n');
+  }
+});
+
+/**
+ * 獲取當前遊戲狀態
+ */
+function getCurrentState() {
+  const position = bot.entity.position;
+  
+  // 獲取附近實體
+  const nearbyEntities = Object.values(bot.entities)
+    .filter(entity => entity.position.distanceTo(position) < 32)
+    .map(entity => ({
+      type: entity.type,
+      name: entity.name || entity.displayName,
+      distance: entity.position.distanceTo(position).toFixed(2),
+      position: entity.position
+    }));
+  
+  // 獲取附近方塊
+  const nearbyBlocks = [];
+  for (let x = -16; x <= 16; x += 4) {
+    for (let y = -8; y <= 8; y += 4) {
+      for (let z = -16; z <= 16; z += 4) {
+        const pos = position.offset(x, y, z);
+        const block = bot.blockAt(pos);
+        if (block && block.name !== 'air') {
+          nearbyBlocks.push({
+            name: block.name,
+            position: { x: pos.x, y: pos.y, z: pos.z }
+          });
+        }
+      }
+    }
+  }
+  
+  // 獲取背包物品
+  const inventory = bot.inventory.items().map(item => ({
+    name: item.name,
+    count: item.count,
+    slot: item.slot
+  }));
+  
+  // 獲取時間和天氣
+  const timeOfDay = bot.time.timeOfDay < 6000 ? 'morning' :
+                    bot.time.timeOfDay < 12000 ? 'day' :
+                    bot.time.timeOfDay < 18000 ? 'evening' : 'night';
+  
+  const weather = bot.isRaining ? 'rain' : 'clear';
+  
+  return {
+    position: { x: position.x, y: position.y, z: position.z },
+    health: bot.health,
+    food: bot.food,
+    inventory: inventory,
+    nearby_entities: nearbyEntities,
+    nearby_blocks: nearbyBlocks,
+    time_of_day: timeOfDay,
+    weather: weather,
+    biome: bot.blockAt(position)?.biome?.name || 'unknown'
+  };
+}
+
+/**
+ * 執行動態生成的代碼
+ */
+async function executeCode(code) {
+  try {
+    // 創建執行環境
+    const context = {
+      bot: bot,
+      Vec3: Vec3,
+      goals: goals,
+      mcData: require('minecraft-data')(bot.version),
+      
+      // 常用輔助函數
+      async moveToPosition(x, y, z) {
+        const goal = new goals.GoalBlock(x, y, z);
+        await bot.pathfinder.goto(goal);
+      },
+      
+      async mineBlock(blockName) {
+        const block = bot.findBlock({
+          matching: (block) => block.name === blockName,
+          maxDistance: 32
+        });
+        
+        if (block) {
+          await bot.dig(block);
+          return { success: true, message: `Mined ${blockName}` };
+        } else {
+          return { success: false, error: `${blockName} not found` };
+        }
+      },
+      
+      async attackNearest(mobType) {
+        const entity = bot.nearestEntity(e => 
+          e.type === 'mob' && e.name === mobType && 
+          e.position.distanceTo(bot.entity.position) < 16
+        );
+        
+        if (entity) {
+          await bot.attack(entity);
+          return { success: true, message: `Attacked ${mobType}` };
+        } else {
+          return { success: false, error: `${mobType} not found` };
+        }
+      },
+      
+      async collectItem(itemName) {
+        const item = bot.nearestEntity(e =>
+          e.type === 'object' && e.name === itemName &&
+          e.position.distanceTo(bot.entity.position) < 16
+        );
+        
+        if (item) {
+          await bot.pathfinder.goto(new goals.GoalNear(item.position.x, item.position.y, item.position.z, 1));
+          return { success: true, message: `Collected ${itemName}` };
+        } else {
+          return { success: false, error: `${itemName} not found` };
+        }
+      }
+    };
+    
+    // 執行代碼
+    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+    const fn = new AsyncFunction(...Object.keys(context), code);
+    const result = await fn(...Object.values(context));
+    
+    return {
+      success: true,
+      result: result,
+      timestamp: new Date().toISOString()
+    };
+    
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message,
+      stack: err.stack,
+      timestamp: new Date().toISOString()
+    };
+  }
+}
+
+console.log(`🚀 Minecraft Bot Controller started`);
+console.log(`📡 Connecting to ${MC_HOST}:${MC_PORT} as ${BOT_USERNAME}...`);
